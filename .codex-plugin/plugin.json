@@ -1,6 +1,6 @@
 {
   "name": "snytro-search-boost",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local document indexing and source-backed search for Codex and Claude Code, with a skill, CLI, CPU embeddings, and SQLite or PostgreSQL.",
   "author": { "name": "Snytro", "url": "https://snytro.com" },
   "repository": "https://github.com/snytro/snytro-search-boost",

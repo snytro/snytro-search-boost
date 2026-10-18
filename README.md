@@ -5,7 +5,7 @@ and local CLI. **Set up → Index → Ask.** Choose SQLite (default) or PostgreS
 and optional CPU embeddings. No MCP server, Ollama, preinstalled Python,
 desktop file-manager app, or separate LLM API key is required.
 
-Developed by **[Snytro](https://snytro.com)**. This is an early `0.1.0` release
+Developed by **[Snytro](https://snytro.com)**. This is an early `0.1.1` release
 distributed from GitHub, not an approved listing in the public plugin directories.
 
 ## Install in Codex
@@ -106,6 +106,14 @@ Initial extractive previews are labeled, and text/keyword retrieval can work whi
 semantic indexing or agent analysis is incomplete. The CLI's `search` command
 returns evidence; the host agent writes the final answer.
 
+The invoking GPT/Codex or Claude agent also acts as the **relevance judge**. Search
+results are candidates, not guaranteed matches. The skill instructs the agent to
+check requirements, exclusions, and field context; reject contradicted matches;
+inspect unresolved previews more deeply; and deduplicate repeated passages before
+answering. For example, a male-vocal prompt mentioning female vocals in its exclusion
+list does not qualify as a female-vocal recommendation. See the shipped
+[relevance workflow](skills/documents/references/relevance.md).
+
 The CLI emits JSON. Collection and data-directory flags go **before** the command.
 See [command reference](skills/documents/references/commands.md) and
 [agent analysis](skills/documents/references/analysis.md).
@@ -136,6 +144,10 @@ Citations use physical PDF pages, document units, or sheet/row ranges.
 macOS ARM64 is the verified initial platform. Linux and Windows launchers exist
 but have not been validated on those platforms; there is no Windows installer.
 The 16 GB Intel i5 target still needs performance testing.
+Keyword search remains broad, multilingual tokenization can yield fragment matches,
+and reindexing a folder does not automatically prune records for deleted files.
+The agent's relevance review improves selection after retrieval; it does not replace
+tokenizer or index-maintenance work, or guarantee recall beyond inspected candidates.
 
 ## Updates
 

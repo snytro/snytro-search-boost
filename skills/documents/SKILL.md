@@ -1,6 +1,6 @@
 ---
 name: documents
-description: Set up Snytro, index explicitly selected local documents, and answer questions through scoped hierarchical retrieval using a local CLI. Use for persistent local document collections, comparisons, summaries and source-backed answers.
+description: Set up Snytro, index selected local documents, and use the invoking agent's reasoning to select relevant evidence and answer through scoped hierarchical retrieval. Use for persistent document collections, constrained search, comparisons, summaries and source-backed answers.
 ---
 
 # Snytro Search Boost
@@ -11,6 +11,13 @@ Resolve `<skill-dir>` to this file's directory. On macOS/Linux invoke
 `& "<skill-dir>/scripts/snytro.ps1"`. Quote paths; pass text as arguments, never shell code.
 Global flags (`--data-dir`, `--collection`) go before the command. Results are JSON;
 check `ok`, process exit code and indexing errors before claiming success.
+
+You, the invoking Codex/GPT or Claude agent, are Snytro's LLM planner, relevance
+judge, and answer writer. The CLI extracts, stores, and ranks retrieval candidates;
+it does not decide which documents satisfy the user's request. Keyword, vector,
+and fusion scores are discovery signals, not proof of relevance. Apply your own
+reasoning to candidate content, its field/section context, and the user's constraints
+before including it in an answer. No additional LLM service is required.
 
 ## Set up
 
@@ -48,16 +55,38 @@ that agent's provider. Do not describe the whole workflow as fully offline/priva
 
 ## Ask indexed documents
 
-Read [commands.md](references/commands.md) for arguments and JSON inputs.
-Use the least expensive sufficient stage, checking evidence after each step:
+Read [relevance.md](references/relevance.md) before answering document-content
+questions, and [commands.md](references/commands.md) for arguments and JSON inputs.
+Identify the user's required facts, exclusions, scope, and source precision. After
+each stage, decide which candidates are supported, contradicted, or unresolved,
+and what evidence is still missing. Keep compact document IDs, source locators,
+and short evidence-based reasons; do not output private chain-of-thought.
+Use the least expensive sufficient stage:
 
 1. Scope questions: `list` only. Do not index or search content.
 2. Find candidates: `search "<question>" --stage taglines`.
-3. Read selected document summaries: `summaries --document-ids <ids>`.
+3. Read plausible and unresolved document summaries: `summaries --document-ids <ids>`.
 4. For amounts, dates or entities: `structured --document-ids <ids>` if extraction exists.
-5. Focused passages: `search "<question>" --stage chunks --semantic --document-ids <ids>`.
+5. Focused passages: `search "<focused evidence request>" --stage chunks --document-ids <ids>`;
+   add `--semantic` only when embeddings are ready.
 6. Locate units: `search "<question>" --stage pages --document-ids <ids>`.
 7. Exact facts/quotes/calculations: `fetch <id> --unit <number>`; follow `next_offset` when needed.
+
+Read original units when a result's relevance depends on negation, an exclusion
+list, field meaning, competing requirements, or exact language. A mention in an
+excluded/negative field does not establish that the requested feature is present.
+Deduplicate repeated passages and review distinct documents before choosing matches.
+Return only candidates whose evidence supports the user's requirements; mark partial
+matches separately if useful. Never present rejected candidates as recommendations.
+
+If taglines/previews miss required detail, search summaries/pages/chunks in the same
+user scope before excluding those documents. Rephrase focused queries or increase
+`--limit` (up to 50) when noise crowds results; keep rejected IDs separate from IDs
+not yet assessed. Do not narrow a new discovery attempt to the rejected shortlist.
+If summaries are pending, inspect originals for promising candidates; completing
+every collection summary is not a prerequisite to answering a focused question.
+Do not claim all matches, no matches in the collection, or an exhaustive comparison
+from a top-k result list. Verify coverage or describe the search as limited.
 
 Keep all calls in the selected collection. Pass explicit IDs for a selected subset;
 an empty subset must return no documents. If no relevant evidence is found, say so

@@ -28,6 +28,9 @@ scope just to obtain results. `list` is paginated; continue while full pages are
 Catalog stages are keyword retrieval; `chunks --semantic` fuses keyword and vector
 results using reciprocal rank fusion. KNN filters apply to collection and document
 IDs before top-k. Scores across retrieval surfaces are not interchangeable.
+All returned rows are candidates. The invoking agent must judge relevance against
+the user's requirements and exclusions; the CLI runs no internal LLM relevance
+filter. Use [relevance.md](relevance.md) to accept or reject evidence before answering.
 Source evidence contains filename/path, content checksum and locator. Readiness
 reports analysis and embedding state separately. Extractive previews do not imply
 completed semantic compression.

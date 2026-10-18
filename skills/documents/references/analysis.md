@@ -6,6 +6,13 @@ currencies, dates, IDs, obligations, table rows and useful headings. Do not inve
 missing values. Write markdown, not HTML. Use bounded fetches and follow offsets
 until the required original unit is complete.
 
+Preserve whether a property is requested, allowed, excluded, optional, or quoted.
+Keep field/section meaning when compressing text or JSON: summarize `exclude_styles`
+as exclusions rather than merging its terms into a positive description. Preserve
+conflicting settings and language distinctions. A neutral reusable summary describes
+the source; relevance to a particular question is decided at retrieval time under
+[relevance.md](relevance.md), not stored as a permanent document label.
+
 Save analysis using a JSON file or stdin (`--input -`):
 
 ```json
