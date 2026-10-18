@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "snytro-search-boost",
+  "version": "0.1.0",
+  "description": "Local document indexing and source-backed search for Codex and Claude Code, with a skill, CLI, CPU embeddings, and SQLite or PostgreSQL.",
+  "author": { "name": "Snytro", "url": "https://snytro.com" },
+  "repository": "https://github.com/snytro/snytro-search-boost",
+  "homepage": "https://github.com/snytro/snytro-search-boost#readme",
+  "license": "Apache-2.0",
+  "keywords": ["documents", "search", "embeddings", "sqlite", "postgresql"],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "Snytro Search Boost",
+        "shortDescription": "Index and search selected local documents",
+        "longDescription": "Build persistent local document collections and answer questions with sources. Includes a CLI, SQLite or PostgreSQL storage, and optional CPU embeddings. The host agent supplies summaries and final answers. Model weights and user indexes are stored outside the plugin.",
+        "developerName": "Snytro",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write", "Local"],
+        "websiteURL": "https://github.com/snytro/snytro-search-boost",
+        "defaultPrompt": ["Set up Snytro and index these selected documents.", "Search my Snytro collection and answer with sources."]
+      }
+    }
+  }
+}

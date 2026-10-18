@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+settings.json
+postgres-auth.json
+*.sqlite3*
+models/
+runtime-data/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+.pytest_cache/
+build/

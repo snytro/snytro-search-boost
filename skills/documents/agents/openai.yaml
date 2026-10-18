@@ -1,0 +1,4 @@
+interface:
+  display_name: "Snytro Search Boost"
+  short_description: "Index and search selected local documents"
+  default_prompt: "Use $documents to set up a local document collection, index my selected files, and answer questions with sources."

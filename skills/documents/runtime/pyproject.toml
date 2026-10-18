@@ -1,0 +1,41 @@
+[project]
+name = "snytro-documents-cli"
+version = "0.1.0"
+description = "Local document ingestion and scoped hierarchical retrieval for agent skills"
+requires-python = ">=3.12,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = [
+  "beautifulsoup4>=4.12,<5",
+  "platformdirs>=4.3,<5",
+  "psutil>=6,<8",
+  "pypdf>=5,<7",
+  "python-docx>=1.2,<2",
+  "openpyxl>=3.1,<4",
+  "sqlite-vec==0.1.6",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
+embeddings = ["sentence-transformers>=6.0,<7", "transformers>=5.20,<6", "torch>=2.6,<3"]
+
+[project.scripts]
+snytro = "snytro_cli.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/snytro_cli"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

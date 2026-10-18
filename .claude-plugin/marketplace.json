@@ -1,0 +1,12 @@
+{
+  "name": "snytro",
+  "description": "Snytro plugins for local document indexing and source-backed search.",
+  "owner": { "name": "Snytro", "url": "https://snytro.com" },
+  "plugins": [
+    {
+      "name": "snytro-search-boost",
+      "source": "./",
+      "description": "Index selected local documents and search with sources using SQLite or PostgreSQL and CPU embeddings."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Snytro — https://snytro.com
+set -euo pipefail
+PACKAGE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "${SNYTRO_DATA_DIR:-}" ]]; then
+  if [[ "$(uname -s)" == Darwin ]]; then
+    export SNYTRO_DATA_DIR="$HOME/Library/Application Support/SnytroCLI"
+  else
+    export SNYTRO_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/SnytroCLI"
+  fi
+fi
+PYTHON="$SNYTRO_DATA_DIR/runtime/.venv/bin/python"
+if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" -c 'import snytro_cli' >/dev/null 2>&1; then
+  bash "$PACKAGE_DIR/scripts/bootstrap.sh"
+fi
+exec "$PYTHON" -m snytro_cli.cli "$@"
