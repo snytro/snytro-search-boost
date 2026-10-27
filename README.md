@@ -148,7 +148,7 @@ From a repository checkout on macOS/Linux:
 bash skills/documents/scripts/bootstrap.sh
 bash skills/documents/scripts/snytro doctor
 bash skills/documents/scripts/bootstrap.sh --embeddings
-bash skills/documents/scripts/snytro setup --storage sqlite --model ultrabert
+bash skills/documents/scripts/snytro setup --storage sqlite --model auto
 bash skills/documents/scripts/snytro model-download
 bash skills/documents/scripts/snytro --collection contracts index "/path/to/selected/contracts"
 bash skills/documents/scripts/snytro --collection contracts status JOB_ID

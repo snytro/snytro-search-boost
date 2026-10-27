@@ -11,13 +11,14 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / "runtime" / "src"
 sys.path.insert(0, str(SOURCE))
 
 from snytro_cli.cli import status
-from snytro_cli.embeddings import model_key, validate_vector
+from snytro_cli.embeddings import Embedder, model_key, validate_vector
 from snytro_cli.engine import Engine, collection_lock
 from snytro_cli.extract import discover, extract_units, text_chunks
 from snytro_cli.settings import atomic_json, load_settings
@@ -178,6 +179,49 @@ class RetrievalContract:
         self.assertEqual(rows[0]["document_id"], record["id"])
         self.engine.store.remove(self.collection, [record["id"]])
         self.assertEqual(self.engine.store.semantic(self.collection, vector, model_key(self.engine.settings), None, 5), [])
+
+    def test_bge_chunking_keeps_end_of_long_document_searchable(self):
+        if self.postgres:
+            self.skipTest("SQLite keyword and vector replacement regression")
+
+        class Tokenizer:
+            def __init__(self, truncate):
+                self.truncate = truncate
+
+            def encode(self, content, add_special_tokens=False):
+                ids = content.split()
+                return SimpleNamespace(ids=ids[:512] if self.truncate else ids)
+
+            def decode(self, ids, skip_special_tokens=True):
+                return " ".join(ids)
+
+        class BgeFake(Embedder):
+            def __init__(self, settings):
+                self.settings = settings
+                self.model = SimpleNamespace(model=SimpleNamespace(tokenizer=Tokenizer(truncate=True)))
+                self.chunk_tokenizer = Tokenizer(truncate=False)
+
+            def encode(self, texts, *, query=False):
+                return [[1.0] + [0.0] * 383 for _ in texts]
+
+        self.engine.settings = {**self.settings, "model": "bge-small"}
+        self.engine._embedder = BgeFake(self.engine.settings)
+        self.invoice.write_text("opening " * 700 + "tailmarker")
+        self.engine.index_file(self.invoice)
+        self.assertTrue(self.engine.search("tailmarker", "chunks", None, 5, False))
+        self.assertTrue(self.engine.search("tailmarker", "chunks", None, 5, True))
+
+    def test_existing_sqlite_database_can_replace_and_remove_documents(self):
+        if self.postgres:
+            self.skipTest("SQLite schema upgrade regression")
+        invoice, contract = self.index()
+        with self.engine.store.connection() as connection:
+            connection.execute("DROP TABLE snytro_vectors_384")
+        self.invoice.write_text("Updated invoice INV-1. Total AUD 1500.")
+        self.engine.index_file(self.invoice)
+        self.engine.store.remove(self.collection, [contract["id"]])
+        self.assertTrue(self.engine.search("1500", "chunks", [invoice["id"]], 5, False))
+        self.assertEqual(self.engine.store.documents(self.collection, [contract["id"]]), [])
 
     def test_vector_replacement_rolls_back_atomically(self):
         invoice, _ = self.index()

@@ -133,9 +133,14 @@ class Store:
     def _delete_chunks(self, connection, collection: str, document_id: str):
         if not self.postgres:
             rows = self.execute(connection, "SELECT rowid FROM snytro_chunks WHERE collection=? AND document_id=?", (collection, document_id)).fetchall()
+            # Existing databases may predate the 384-dimensional BGE table.
+            tables = {row["name"] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('snytro_vectors_384','snytro_vectors_768','snytro_vectors_2048')"
+            )}
             for row in rows:
                 for dimensions in (384, 768, 2048):
-                    connection.execute(f"DELETE FROM snytro_vectors_{dimensions} WHERE rowid=?", (row["rowid"],))
+                    if f"snytro_vectors_{dimensions}" in tables:
+                        connection.execute(f"DELETE FROM snytro_vectors_{dimensions} WHERE rowid=?", (row["rowid"],))
         self.execute(connection, "DELETE FROM snytro_chunks WHERE collection=? AND document_id=?", (collection, document_id))
 
     def _catalog(self, connection, record: dict):

@@ -14,7 +14,7 @@ from .settings import MODELS
 def model_key(settings: dict) -> str:
     return hashlib.sha256(json.dumps({
         "model": settings["model"], "revision": settings.get("model_revision"),
-        "processing": "snytro-bge-small-onnx-normalized-v1" if settings["model"] == "bge-small" else "snytro-cpu-fp32-normalized-prompts-v1",
+        "processing": "snytro-bge-small-onnx-normalized-v2" if settings["model"] == "bge-small" else "snytro-cpu-fp32-normalized-prompts-v1",
         "chunk_tokens": settings["chunk_tokens"],
     }, sort_keys=True).encode()).hexdigest()
 
@@ -40,6 +40,7 @@ class Embedder:
             if settings["chunk_tokens"] > 512:
                 raise ValueError("BGE-small supports at most 512 tokens per chunk.")
             from fastembed import TextEmbedding
+            from tokenizers import Tokenizer
             self.model = TextEmbedding(
                 model_name=MODELS["bge-small"]["inference_name"],
                 specific_model_path=settings["model_path"], local_files_only=True,
@@ -48,6 +49,11 @@ class Embedder:
             )
             if self.model.embedding_size != 384:
                 raise ValueError("Downloaded model has an unexpected embedding dimension.")
+            # FastEmbed's inference tokenizer truncates to its context window.
+            # Chunk the entire extraction with a separate, unrestricted tokenizer.
+            self.chunk_tokenizer = Tokenizer.from_file(str(Path(settings["model_path"]) / "tokenizer.json"))
+            self.chunk_tokenizer.no_truncation()
+            self.chunk_tokenizer.no_padding()
             return
         # Never execute downloaded model code implicitly. Both integrations must use native support.
         import torch
@@ -63,7 +69,7 @@ class Embedder:
             raise ValueError("Downloaded model has an unexpected embedding dimension.")
 
     def chunks(self, text: str) -> list[str]:
-        tokenizer = self.model.model.tokenizer if self.settings["model"] == "bge-small" else self.model.tokenizer
+        tokenizer = self.chunk_tokenizer if self.settings["model"] == "bge-small" else self.model.tokenizer
         encoded = tokenizer.encode(text, add_special_tokens=False)
         ids = encoded.ids if self.settings["model"] == "bge-small" else encoded
         size = self.settings["chunk_tokens"] - 32
