@@ -15,6 +15,10 @@ from platformdirs import user_data_path
 
 
 MODELS = {
+    "bge-small": {
+        "id": "qdrant/bge-small-en-v1.5-onnx-q", "inference_name": "BAAI/bge-small-en-v1.5",
+        "dimensions": 384, "download_gb": 0.067, "language": "English", "weight_ram_gb_fp32": 0.067,
+    },
     "ultrabert": {
         "id": "dmis-lab/UltraBERT-Embed-150M", "dimensions": 768,
         "download_gb": 0.61, "language": "English", "weight_ram_gb_fp32": 0.61,
@@ -76,7 +80,10 @@ def machine_report(root: Path, *, language: str = "english", priority: str = "ba
     available = memory.available / 1e9
     total = memory.total / 1e9
     # These are fit heuristics, not claims about measured accuracy or throughput.
+    intel_mac = platform.system() == "Darwin" and platform.machine() == "x86_64"
     recommend = "nemotron" if available >= 8 and (language != "english" or priority == "accuracy") else "ultrabert"
+    if intel_mac and language == "english":
+        recommend = "bge-small"
     warnings = []
     cpu = platform.processor() or platform.machine()
     features = []
@@ -96,9 +103,9 @@ def machine_report(root: Path, *, language: str = "english", priority: str = "ba
             elif key.strip() in {"flags", "Features"}:
                 features = value.lower().split()
                 break
-    if language != "english" and recommend == "ultrabert":
+    if language != "english" and recommend in {"ultrabert", "bge-small"}:
         recommend = "nemotron" if available >= 6 else None
-        warnings.append("UltraBERT is English-only; do not silently select it for multilingual documents.")
+        warnings.append("The English-only models are unsuitable for multilingual documents.")
     if available < 3:
         recommend = None
         warnings.append("Low available RAM. Close applications before enabling local embeddings.")

@@ -167,6 +167,18 @@ class RetrievalContract:
         rows = self.engine.store.semantic(self.collection, vector, model_key(self.engine.settings), [record["id"]], 5)
         self.assertEqual(rows[0]["document_id"], record["id"])
 
+    def test_bge_small_dimensions_are_supported_and_scoped(self):
+        class BgeFake(FakeEmbedder):
+            dimensions = 384
+        self.engine.settings = {**self.settings, "model": "bge-small"}
+        self.engine._embedder = BgeFake()
+        record = self.engine.index_file(self.invoice)
+        vector = BgeFake().encode(["invoice"])[0]
+        rows = self.engine.store.semantic(self.collection, vector, model_key(self.engine.settings), [record["id"]], 5)
+        self.assertEqual(rows[0]["document_id"], record["id"])
+        self.engine.store.remove(self.collection, [record["id"]])
+        self.assertEqual(self.engine.store.semantic(self.collection, vector, model_key(self.engine.settings), None, 5), [])
+
     def test_vector_replacement_rolls_back_atomically(self):
         invoice, _ = self.index()
         record = self.engine.store.document(self.collection, invoice["id"])

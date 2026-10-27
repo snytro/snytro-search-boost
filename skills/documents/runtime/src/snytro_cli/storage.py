@@ -97,7 +97,7 @@ class Store:
                 connection.execute("CREATE TABLE IF NOT EXISTS snytro_catalog (id TEXT PRIMARY KEY, collection TEXT NOT NULL, document_id TEXT NOT NULL REFERENCES snytro_documents(id) ON DELETE CASCADE, stage TEXT NOT NULL, content TEXT NOT NULL, data JSONB NOT NULL)")
             else:
                 connection.execute("CREATE VIRTUAL TABLE IF NOT EXISTS snytro_catalog USING fts5(id UNINDEXED,collection UNINDEXED,document_id UNINDEXED,stage UNINDEXED,content,data UNINDEXED)")
-                for dimensions in (768, 2048):
+                for dimensions in (384, 768, 2048):
                     connection.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS snytro_vectors_{dimensions} USING vec0(collection TEXT PARTITION KEY, document_id TEXT, model_key TEXT, embedding float[{dimensions}])")
         if not self.postgres and os.name != "nt":
             for name in ("documents.sqlite3", "documents.sqlite3-wal", "documents.sqlite3-shm"):
@@ -134,7 +134,7 @@ class Store:
         if not self.postgres:
             rows = self.execute(connection, "SELECT rowid FROM snytro_chunks WHERE collection=? AND document_id=?", (collection, document_id)).fetchall()
             for row in rows:
-                for dimensions in (768, 2048):
+                for dimensions in (384, 768, 2048):
                     connection.execute(f"DELETE FROM snytro_vectors_{dimensions} WHERE rowid=?", (row["rowid"],))
         self.execute(connection, "DELETE FROM snytro_chunks WHERE collection=? AND document_id=?", (collection, document_id))
 

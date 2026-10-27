@@ -155,6 +155,10 @@ bash skills/documents/scripts/snytro --collection contracts status JOB_ID
 bash skills/documents/scripts/snytro --collection contracts search "cancellation notice" --stage chunks --semantic
 ```
 
+On Intel Macs, `--embeddings` installs the smaller ONNX Runtime backend and
+`setup --model auto` selects English BGE-small v1.5. Use `--model bge-small`
+explicitly to select it on another platform. It produces 384-dimensional vectors
+without PyTorch; the model is downloaded separately by `model-download`.
 For Nemotron, choose `--model nemotron`. Indexing returns a durable job ID; poll
 status and resume interrupted work with `resume JOB_ID`. The host agent builds
 hierarchical summaries and optional structured fields, then answers with sources.
