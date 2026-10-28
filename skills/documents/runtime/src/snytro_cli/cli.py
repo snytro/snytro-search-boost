@@ -160,7 +160,7 @@ def execute(args):
         if model == "auto":
             model = report["recommended_model"]
             if model is None:
-                raise ValueError("Cannot recommend a model with the current available memory. Free RAM or choose --model explicitly.")
+                raise ValueError(" ".join(report["warnings"]) or "No suitable embedding model is available for this machine and language.")
         chunk_tokens = args.chunk_tokens or old.get("chunk_tokens", 512)
         if model == "bge-small" and chunk_tokens > 512:
             raise ValueError("BGE-small supports at most 512 tokens per chunk. Choose --chunk-tokens 512 or less.")

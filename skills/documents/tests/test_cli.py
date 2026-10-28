@@ -17,11 +17,11 @@ from unittest.mock import patch
 SOURCE = Path(__file__).resolve().parents[1] / "runtime" / "src"
 sys.path.insert(0, str(SOURCE))
 
-from snytro_cli.cli import status
+from snytro_cli.cli import execute, parser, status
 from snytro_cli.embeddings import Embedder, model_key, validate_vector
 from snytro_cli.engine import Engine, collection_lock
 from snytro_cli.extract import discover, extract_units, text_chunks
-from snytro_cli.settings import atomic_json, load_settings
+from snytro_cli.settings import atomic_json, load_settings, machine_report
 
 
 class FakeEmbedder:
@@ -259,6 +259,27 @@ class PostgresContract(RetrievalContract, unittest.TestCase):
 
 
 class ExtractionAndCLI(unittest.TestCase):
+    def test_intel_mac_auto_rejects_multilingual_model_even_with_enough_ram(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("snytro_cli.settings.platform.system", return_value="Darwin"), \
+                patch("snytro_cli.settings.platform.machine", return_value="x86_64"), \
+                patch("psutil.virtual_memory", return_value=SimpleNamespace(available=16e9, total=24e9)), \
+                patch("snytro_cli.settings.subprocess.run", return_value=SimpleNamespace(returncode=1, stdout="")):
+            root = Path(directory)
+            report = machine_report(root, language="multilingual", priority="accuracy")
+            self.assertIsNone(report["recommended_model"])
+            self.assertTrue(any("Intel Mac" in warning and "multilingual" in warning for warning in report["warnings"]))
+            arguments = parser().parse_args([
+                "--data-dir", str(root), "setup", "--model", "auto",
+                "--language", "multilingual", "--priority", "accuracy",
+            ])
+            with self.assertRaisesRegex(ValueError, "Intel Mac.*multilingual"):
+                execute(arguments)
+            self.assertFalse((root / "settings.json").exists())
+            with patch("snytro_cli.settings.platform.machine", return_value="arm64"):
+                supported = machine_report(root, language="multilingual", priority="accuracy")
+            self.assertEqual(supported["recommended_model"], "nemotron")
+
     def test_directory_selection_does_not_follow_external_symlink(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

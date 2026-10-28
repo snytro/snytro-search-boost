@@ -15,6 +15,8 @@
    Nemotron on supported machines.
 4. Configure: `scripts/snytro setup --storage sqlite --model bge-small`, `ultrabert`,
    or `nemotron`. Intel Mac `--model auto` recommends BGE-small for English documents.
+   On Intel Macs, multilingual auto setup stops because the installed BGE backend
+   is English-only; use `--model none` for keyword search or a supported host for Nemotron.
    `--model auto --language multilingual --priority accuracy` uses the diagnostic
    recommendation; if RAM is inadequate it stops rather than picking an unsuitable model.
 5. `scripts/snytro model-download` downloads the selected snapshot, pins its immutable

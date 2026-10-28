@@ -82,9 +82,13 @@ def machine_report(root: Path, *, language: str = "english", priority: str = "ba
     # These are fit heuristics, not claims about measured accuracy or throughput.
     intel_mac = platform.system() == "Darwin" and platform.machine() == "x86_64"
     recommend = "nemotron" if available >= 8 and (language != "english" or priority == "accuracy") else "ultrabert"
-    if intel_mac and language == "english":
-        recommend = "bge-small"
     warnings = []
+    if intel_mac:
+        if language == "english":
+            recommend = "bge-small"
+        else:
+            recommend = None
+            warnings.append("Intel Mac bootstrap supports English BGE-small only; multilingual embeddings are unavailable. Use --model none for keyword search or use a machine with Nemotron support.")
     cpu = platform.processor() or platform.machine()
     features = []
     if platform.system() == "Darwin":
@@ -115,6 +119,6 @@ def machine_report(root: Path, *, language: str = "english", priority: str = "ba
         "total_ram_gb": round(total, 2), "available_ram_gb": round(available, 2),
         "free_disk_gb": round(shutil.disk_usage(disk_path).free / 1e9, 2),
         "recommended_model": recommend, "language": language, "priority": priority,
-        "reason": "Based on available memory and language/priority; validate latency on this computer.",
+        "reason": "Based on platform, available memory, and language/priority; validate latency on this computer.",
         "models": MODELS, "warnings": warnings,
     }
