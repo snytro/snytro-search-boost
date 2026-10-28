@@ -148,12 +148,25 @@ From a repository checkout on macOS/Linux:
 bash skills/documents/scripts/bootstrap.sh
 bash skills/documents/scripts/snytro doctor
 bash skills/documents/scripts/bootstrap.sh --embeddings
-bash skills/documents/scripts/snytro setup --storage sqlite --model ultrabert
+bash skills/documents/scripts/snytro setup --storage sqlite --model auto
 bash skills/documents/scripts/snytro model-download
 bash skills/documents/scripts/snytro --collection contracts index "/path/to/selected/contracts"
 bash skills/documents/scripts/snytro --collection contracts status JOB_ID
 bash skills/documents/scripts/snytro --collection contracts search "cancellation notice" --stage chunks --semantic
 ```
+
+On Intel Macs, `--embeddings` installs the smaller ONNX Runtime backend and
+`setup --model auto` selects English BGE-small v1.5. On Linux or Apple Silicon,
+install the BGE backend before selecting it explicitly:
+
+```bash
+bash skills/documents/scripts/bootstrap.sh --bge-small
+bash skills/documents/scripts/snytro setup --storage sqlite --model bge-small
+bash skills/documents/scripts/snytro model-download
+```
+
+BGE-small produces 384-dimensional vectors without PyTorch. `model-download`
+downloads its model separately from the runtime dependencies.
 
 For Nemotron, choose `--model nemotron`. Indexing returns a durable job ID; poll
 status and resume interrupted work with `resume JOB_ID`. The host agent builds

@@ -43,7 +43,7 @@ def parser():
     doctor.add_argument("--priority", choices=["balanced", "accuracy"], default="balanced")
     setup = commands.add_parser("setup")
     setup.add_argument("--storage", choices=["sqlite", "postgres"], default=None)
-    setup.add_argument("--model", choices=["auto", "ultrabert", "nemotron", "none"], default=None)
+    setup.add_argument("--model", choices=["auto", "bge-small", "ultrabert", "nemotron", "none"], default=None)
     setup.add_argument("--language", choices=["english", "multilingual"], default="english")
     setup.add_argument("--priority", choices=["balanced", "accuracy"], default="balanced")
     setup.add_argument("--download-model", action="store_true")
@@ -140,7 +140,7 @@ def execute(args):
     if args.command == "doctor":
         report = machine_report(root, language=args.language, priority=args.priority)
         versions = {}
-        for package in ("sqlite-vec", "torch", "transformers", "sentence-transformers", "psycopg"):
+        for package in ("sqlite-vec", "fastembed", "onnxruntime", "torch", "transformers", "sentence-transformers", "psycopg"):
             try:
                 versions[package] = importlib.metadata.version(package)
             except importlib.metadata.PackageNotFoundError:
@@ -160,9 +160,12 @@ def execute(args):
         if model == "auto":
             model = report["recommended_model"]
             if model is None:
-                raise ValueError("Cannot recommend a model with the current available memory. Free RAM or choose --model explicitly.")
+                raise ValueError(" ".join(report["warnings"]) or "No suitable embedding model is available for this machine and language.")
+        chunk_tokens = args.chunk_tokens or old.get("chunk_tokens", 512)
+        if model == "bge-small" and chunk_tokens > 512:
+            raise ValueError("BGE-small supports at most 512 tokens per chunk. Choose --chunk-tokens 512 or less.")
         settings = {"version": 1, "storage": storage, "model": model, "batch_size": args.batch_size or old.get("batch_size", 1),
-                    "chunk_tokens": args.chunk_tokens or old.get("chunk_tokens", 512), "threads": args.threads or old.get("threads", 2)}
+                    "chunk_tokens": chunk_tokens, "threads": args.threads or old.get("threads", 2)}
         if model == old.get("model"):
             for key in ("model_revision", "model_path"):
                 if old.get(key):

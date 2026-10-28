@@ -48,9 +48,14 @@ if [[ ! -x "$UV_EXECUTABLE" ]]; then
   fi
 fi
 EXTRAS=""
+INTEL_MAC=0
+if [[ "$(uname -s):$(uname -m)" == "Darwin:x86_64" ]]; then INTEL_MAC=1; fi
 for option in "$@"; do
   case "$option" in
-    --embeddings) EXTRAS="${EXTRAS:+$EXTRAS,}embeddings" ;;
+    --embeddings)
+      if [[ "$INTEL_MAC" == 1 ]]; then EXTRAS="${EXTRAS:+$EXTRAS,}bge-small"
+      else EXTRAS="${EXTRAS:+$EXTRAS,}embeddings"; fi ;;
+    --bge-small) EXTRAS="${EXTRAS:+$EXTRAS,}bge-small" ;;
     --postgres) EXTRAS="${EXTRAS:+$EXTRAS,}postgres" ;;
     *) echo "Unknown bootstrap option: $option" >&2; exit 1 ;;
   esac
@@ -64,6 +69,7 @@ fi
 export UV_PROJECT_ENVIRONMENT="$SNYTRO_ROOT/runtime/.venv"
 SYNC_ARGS=(sync --project "$PACKAGE_DIR/runtime" --frozen --no-dev --no-editable --inexact)
 if [[ "$EXTRAS" == *embeddings* ]]; then SYNC_ARGS+=(--extra embeddings); fi
+if [[ "$EXTRAS" == *bge-small* ]]; then SYNC_ARGS+=(--extra bge-small); fi
 if [[ "$EXTRAS" == *postgres* ]]; then SYNC_ARGS+=(--extra postgres); fi
 "$UV_EXECUTABLE" "${SYNC_ARGS[@]}" >&2
 echo "Snytro runtime ready at $SNYTRO_ROOT. Run scripts/snytro doctor." >&2
