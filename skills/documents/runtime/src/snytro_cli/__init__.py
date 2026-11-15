@@ -2,4 +2,4 @@
 # Copyright 2026 Snytro — https://snytro.com
 """Snytro's standalone CLI; no desktop app or MCP dependency."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

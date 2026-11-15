@@ -16,10 +16,12 @@ from unittest.mock import patch
 SOURCE = Path(__file__).resolve().parents[1] / "runtime" / "src"
 sys.path.insert(0, str(SOURCE))
 
-from snytro_cli.cli import status
+from snytro_cli.cli import execute, parser, status
 from snytro_cli.embeddings import model_key, validate_vector
 from snytro_cli.engine import Engine, collection_lock
 from snytro_cli.extract import discover, extract_units, text_chunks
+from snytro_cli.handover import export_collection, restore_collection
+from snytro_cli.profiles import install_profile
 from snytro_cli.settings import atomic_json, load_settings
 
 
@@ -185,6 +187,62 @@ class RetrievalContract:
         self.assertFalse(self.engine.search("invoice", "taglines", [invoice["id"]], 5, False))
         self.assertFalse(self.engine.search("invoice", "chunks", [invoice["id"]], 5, True))
 
+    def test_hierarchy_ranks_and_filters_sources_before_top_k(self):
+        install_profile(self.root, self.collection, {
+            "sources": {
+                self.invoice.name: {"rank": 3, "visibility": "explicit_only"},
+                self.contract.name: {"rank": 1, "visibility": "default"},
+            },
+            "routes": {"rental": [self.contract.name]},
+        }, self.root)
+        self.engine = Engine(self.root, self.settings, self.collection)
+        self.engine._embedder = FakeEmbedder()
+        for path in (self.invoice, self.contract):
+            record = self.engine.index_file(path)
+            self.engine.save_analysis(record["id"], {
+                "checksum": record["checksum"], "tagline": "invoice context",
+                "summary": "Terms and conditions", "units": [
+                    {"number": 1, "tagline": "invoice conditions", "summary": "Commercial details"}
+                ],
+            })
+            self.engine.index_file(path)
+        for stage in ("taglines", "summaries", "pages", "chunks"):
+            rows = self.engine.search("invoice", stage, None, 1, True, dense_only=True)
+            self.assertEqual([r["source_file_name"] for r in rows], [self.contract.name])
+            self.assertLess(rows[0]["distance"], 0.01)
+            expanded = self.engine.search("invoice", stage, None, 2, True, dense_only=True, include_explicit=True)
+            self.assertEqual([r["source_file_name"] for r in expanded], [self.contract.name, self.invoice.name])
+        hybrid = self.engine.search("commercial", "pages", None, 5, True)
+        self.assertEqual(len(hybrid), 1)
+        self.assertEqual(hybrid[0]["matched_by"], ["keyword", "semantic"])
+        explicit = self.engine.search("INV-1", "chunks", None, 2, False, exact=True, include_explicit=True)
+        self.assertEqual([r["source_file_name"] for r in explicit], [self.invoice.name])
+        self.assertEqual(self.engine.search("INV-1", "chunks", None, 2, False, exact=True), [])
+        self.assertEqual(self.engine.search("INV-1", "chunks", None, 2, False, exact=True, route="rental", include_explicit=True), [])
+        self.assertFalse(self.engine.search("invoice", "pages", [], 1, True))
+
+    def test_handover_restores_vectors_policy_and_originals_without_reindexing(self):
+        install_profile(self.root, self.collection, {"sources": {
+            self.invoice.name: {"rank": 1, "visibility": "default"},
+            self.contract.name: {"rank": 6, "visibility": "explicit_only"},
+        }}, self.root)
+        self.engine = Engine(self.root, self.settings, self.collection)
+        self.engine._embedder = FakeEmbedder()
+        self.index()
+        filename = self.root / "transfer.zip"
+        export_collection(self.engine, filename, True)
+        target = Engine(self.root / "recipient", {**self.settings, "storage": "sqlite"}, "copy")
+        target.store.initialize()
+        result = restore_collection(target, filename, None)
+        self.assertEqual(result["matching_embedding_documents"], 2)
+        target = Engine(target.root, target.settings, "copy")
+        target._embedder = FakeEmbedder()
+        self.assertEqual((Path(result["source_root"]) / self.invoice.name).read_bytes(), self.invoice.read_bytes())
+        self.assertEqual(target.search("invoice", "chunks", None, 5, True, dense_only=True)[0]["source_file_name"], self.invoice.name)
+        self.assertFalse(target.search("ninety days", "chunks", None, 5, False, exact=True))
+        with self.assertRaisesRegex(ValueError, "empty collection"):
+            restore_collection(target, filename, None)
+
     def test_interrupted_job_is_explicit_and_resumable(self):
         job_id = str(uuid.uuid4())
         self.engine.store.save_job({"id": job_id, "collection": self.collection, "status": "running", "pid": 2147483647, "process_created": 0, "paths": [str(self.invoice)], "recursive": True, "lexical_only": True})
@@ -203,6 +261,62 @@ class PostgresContract(RetrievalContract, unittest.TestCase):
 
 
 class ExtractionAndCLI(unittest.TestCase):
+    def test_api_full_job_uses_only_reviewed_sources_and_resumes_summary_batches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = root / "sources"
+            sources.mkdir()
+            selected = sources / "policy.txt"
+            selected.write_text("\n".join(["Source requires MFA for privileged operators."] * 175))
+            (sources / "answer-key.txt").write_text("UNREVIEWED_SECRET")
+            command = lambda *args: execute(parser().parse_args(["--data-dir", str(root / "state"), *args]))
+            command("setup", "--embedding-provider", "compatible", "--embedding-base-url", "https://vectors.example.test/v1",
+                    "--embedding-model", "example-vector", "--embedding-dimensions", "3", "--embedding-key-env", "EXAMPLE_EMBED_KEY",
+                    "--summary-provider", "openai")
+            profile = root / "policy.json"
+            profile.write_text(json.dumps({"sources": {"policy.txt": {"rank": 1, "visibility": "default"}}}))
+            command("profile", "--input", str(profile), "--source-root", str(sources))
+            calls, fail = [], True
+
+            def post(client, route, body):
+                nonlocal fail
+                self.assertNotIn("UNREVIEWED_SECRET", json.dumps(body))
+                if route == "/embeddings":
+                    self.assertEqual(client.config["key_env"], "EXAMPLE_EMBED_KEY")
+                    self.assertNotIn("dimensions", body)
+                    items = [{"index": i, "embedding": [1, 0, 0]} for i in range(len(body["input"]))]
+                    return {"data": items[::-1]}
+                self.assertEqual(client.config["key_env"], "OPENAI_API_KEY")
+                evidence = json.loads(body["messages"][1]["content"])
+                if "units" in evidence:
+                    numbers = [item["number"] for item in evidence["units"]]
+                    calls.append(numbers)
+                    if 2 in numbers and fail:
+                        fail = False
+                        raise ValueError("Simulated API failure")
+                    value = {"units": [{"number": n, "summary": "Privileged operators require MFA.", "tagline": "MFA"} for n in numbers]}
+                else:
+                    value = {"summary": "Privileged operators require MFA.", "tagline": "Authentication policy"}
+                return {"choices": [{"message": {"content": json.dumps(value)}}]}
+
+            with patch("snytro_cli.providers.Client.post", autospec=True, side_effect=post):
+                first = command("index", str(sources), "--rich", "--full", "--wait")
+                self.assertEqual(first["status"], "completed_with_errors")
+                self.assertEqual(first["result"]["excluded"], [str((sources / "answer-key.txt").resolve())])
+                records = command("list")["documents"]
+                self.assertEqual(records[0]["analysis_status"], "partial")
+                command("setup", "--summary-provider", "host")
+                with self.assertRaisesRegex(ValueError, "API provider settings changed"):
+                    command("_worker", first["id"])
+                command("setup", "--summary-provider", "openai")
+                result = command("_worker", first["id"])
+                self.assertEqual(result["status"], "completed")
+                self.assertEqual(sum(1 in items for items in calls), 1)
+                self.assertEqual(command("verify", "--check-originals")["coverage"]["hierarchy_embeddings_ready"], 1)
+                answer = command("search", "login checks", "--stage", "pages", "--dense-only")
+                self.assertTrue(answer["results"][0]["locator"]["line_start"] >= 1)
+                self.assertEqual(command("fetch", answer["results"][0]["document_id"], "--unit", str(answer["results"][0]["unit"]))["locator"]["kind"], "lines")
+
     def test_directory_selection_does_not_follow_external_symlink(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

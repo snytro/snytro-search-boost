@@ -12,6 +12,12 @@ from .settings import MODELS
 
 
 def model_key(settings: dict) -> str:
+    if settings["model"] == "api":
+        config = settings["embedding_api"]
+        return hashlib.sha256(json.dumps({
+            "api": {key: config[key] for key in ("provider", "url", "model", "dimensions", "send_dimensions")},
+            "processing": "snytro-api-normalized-v1", "chunk_tokens": settings["chunk_tokens"],
+        }, sort_keys=True).encode()).hexdigest()
     return hashlib.sha256(json.dumps({
         "model": settings["model"], "revision": settings.get("model_revision"),
         "processing": "snytro-cpu-fp32-normalized-prompts-v1", "chunk_tokens": settings["chunk_tokens"],
@@ -26,6 +32,49 @@ def validate_vector(value, dimensions: int) -> list[float]:
     if not norm:
         raise ValueError("Embedding model returned a zero vector.")
     return [x / norm for x in result]
+
+
+def dimensions_for(settings):
+    return settings["embedding_api"]["dimensions"] if settings["model"] == "api" else MODELS[settings["model"]]["dimensions"]
+
+
+class APIEmbedder:
+    def __init__(self, settings):
+        from .providers import Client
+        self.settings = settings
+        self.config = settings["embedding_api"]
+        self.client = Client(self.config)
+
+    def chunks(self, text):
+        # Character bounds work without the provider's tokenizer; remote model
+        # limits still apply. Preserve original text rather than decoding tokens.
+        size = self.settings["chunk_tokens"] * 3
+        step = size - min(200, size // 4)
+        pieces = []
+        for start in range(0, len(text), step):
+            piece = text[start:start + size]
+            if piece.strip():
+                pieces.append(piece)
+            if start + size >= len(text):
+                break
+        return pieces
+
+    def encode(self, texts, *, query=False):
+        if not texts:
+            return []
+        data = {"input": texts}
+        if self.config["send_dimensions"]:
+            data["dimensions"] = self.config["dimensions"]
+        if self.config["provider"] == "openai":
+            data["encoding_format"] = "float"
+        response = self.client.post("/embeddings", data)
+        try:
+            rows = sorted(response["data"], key=lambda item: item["index"])
+            if [row["index"] for row in rows] != list(range(len(texts))):
+                raise ValueError
+            return [validate_vector(row["embedding"], self.config["dimensions"]) for row in rows]
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Embedding API returned invalid vectors. Check the configured dimensions and model.") from None
 
 
 class Embedder:

@@ -9,10 +9,18 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .embeddings import MODELS, Embedder, model_key
+from .embeddings import APIEmbedder, Embedder, dimensions_for, model_key
 from .extract import checksum, discover, extract_units, overview, text_chunks
+from .profiles import load_profile, retrieval_scope, source_policy
 from .settings import private_dir
 from .storage import Store
+from .summaries import Summariser, batches, summary_key
+
+HIERARCHY_VERSION = 1
+
+
+def source_id(collection, path):
+    return "doc_" + hashlib.sha256((collection + "\0" + str(path)).encode()).hexdigest()[:32]
 
 
 def now() -> str:
@@ -56,49 +64,127 @@ class Engine:
         self.root, self.settings, self.collection = root, settings, collection
         self.store = Store(root, settings)
         self._embedder = None
+        self.profile = load_profile(root, collection)
 
     def embedder(self):
         if self._embedder is None:
-            self._embedder = Embedder(self.root, self.settings)
+            self._embedder = APIEmbedder(self.settings) if self.settings["model"] == "api" else Embedder(self.root, self.settings)
         return self._embedder
 
     def make_chunks(self, record: dict, semantic: bool = False):
         chunks = []
+        passages = []
         embedder = self.embedder() if semantic else None
+        contexts = {}
+        size = self.settings["batch_size"]
+        if semantic:
+            tags = list(dict.fromkeys(
+                [unit["tagline"] for unit in record["units"] if unit.get("tagline") and unit.get("summary_kind") != "extractive_preview"]
+                + ([record["tagline"]] if record.get("tagline") and record.get("summary_kind") != "extractive_preview" else [])
+            ))
+            for start in range(0, len(tags), size):
+                batch = tags[start:start + size]
+                contexts.update(zip(batch, embedder.encode(batch), strict=True))
+
+        def encode_context(text):
+            return contexts[text]
+
+        def metadata(vector, context):
+            return dict(embedding=vector, context_embedding=context, dimensions=dimensions_for(self.settings), model_key=model_key(self.settings))
+
         for unit in record["units"]:
             texts = embedder.chunks(unit["content"]) if semantic else text_chunks(unit["content"])
-            # Inference is bounded per unit batch; do not encode a whole folder at once.
-            for start in range(0, len(texts), self.settings["batch_size"]):
-                batch = texts[start:start + self.settings["batch_size"]]
-                vectors = embedder.encode(batch) if semantic else [None] * len(batch)
-                for index, (text, vector) in enumerate(zip(batch, vectors), start):
-                    chunk = {"id": f"{record['id']}:u{unit['number']}:c{index}", "content": text,
-                             "locator": {**unit["locator"], "unit": unit["number"], "chunk": index}}
-                    if semantic:
-                        chunk.update(embedding=vector, dimensions=MODELS[self.settings["model"]]["dimensions"], model_key=model_key(self.settings))
-                    chunks.append(chunk)
+            tag = unit.get("tagline") if unit.get("summary_kind") != "extractive_preview" else None
+            for index, text in enumerate(texts):
+                chunk = {"id": f"{record['id']}:u{unit['number']}:c{index}", "content": text,
+                         "locator": {**unit["locator"], "unit": unit["number"], "chunk": index}}
+                chunks.append(chunk)
+                if semantic:
+                    passages.append((chunk, tag))
+        if semantic:
+            # Batch across units so a short page need not make a separate API request.
+            for start in range(0, len(passages), size):
+                batch = passages[start:start + size]
+                vectors = embedder.encode([chunk["content"] for chunk, _ in batch])
+                for (chunk, tag), vector in zip(batch, vectors, strict=True):
+                    chunk.update(**metadata(vector, encode_context(tag) if tag else None))
+            candidates = []
+            if record.get("summary_kind") != "extractive_preview":
+                candidates.extend([
+                    ("taglines", "document", record["tagline"], None, {"kind": "document"}),
+                    ("summaries", "document", record["summary"], record["tagline"], {"kind": "document"}),
+                ])
+            for unit in record["units"]:
+                if unit.get("summary_kind") == "extractive_preview":
+                    continue
+                candidates.append(("pages", str(unit["number"]), unit["summary"], unit["tagline"],
+                                   {**unit["locator"], "unit": unit["number"]}))
+            for start in range(0, len(candidates), size):
+                batch = candidates[start:start + size]
+                vectors = embedder.encode([candidate[2] for candidate in batch])
+                for (stage, part, content, tag, locator), vector in zip(batch, vectors, strict=True):
+                    chunks.append({"id": f"{record['id']}:{stage}:{part}", "stage": stage, "content": content,
+                                   "locator": locator, **metadata(vector, encode_context(tag) if tag else None)})
         return chunks
 
-    def index_file(self, path: Path, *, lexical_only: bool = False):
+    def full_analysis(self, record, heartbeat):
+        config = self.settings.get("summary_api")
+        if not config:
+            raise ValueError("Full API indexing needs a summary provider. Run setup --summary-provider first.")
+        key = summary_key(config)
+        if record.get("analysis_status") == "ready" and record.get("summary_key") == key:
+            return False
+        if record.get("summary_key") != key:
+            record.update(summary_key=key, analysis_status="pending", status="partial", summary_kind="extractive_preview")
+            for unit in record["units"]:
+                unit.update(**overview(unit["content"]), summary_kind="extractive_preview")
+            record.update(**overview("\n".join(unit["summary"] for unit in record["units"])))
+            record.pop("embedding_key", None)
+            if self.settings["model"] != "none":
+                record["embedding_status"] = "pending"
+            self.store.save_document(record, self.make_chunks(record))
+        model = Summariser(config)
+        remaining = [unit for unit in record["units"] if unit.get("summary_kind") != "api_analysis" and unit["content"].strip()]
+        for batch in batches(remaining):
+            results = {row["number"]: row for row in model.units(record["name"], batch)}
+            for unit in batch:
+                result = results[unit["number"]]
+                unit.update(tagline=result["tagline"], summary=result["summary"], summary_kind="api_analysis")
+            record.update(analysis_status="partial", updated_at=now())
+            self.store.save_document(record)
+            if heartbeat:
+                heartbeat()
+        for unit in record["units"]:
+            if not unit["content"].strip():
+                unit.update(tagline="No extractable text", summary="This source unit has no extractable text.", summary_kind="api_analysis")
+        record.update(model.document(record["name"], record["units"]), summary_kind="api_analysis",
+                      analysis_status="ready", status="ready" if self.settings["model"] == "none" else "partial", updated_at=now())
+        record.pop("embedding_key", None)
+        if self.settings["model"] != "none":
+            record["embedding_status"] = "pending"
+        self.store.save_document(record)
+        return True
+
+    def index_file(self, path: Path, *, lexical_only: bool = False, full=False, rich=False, heartbeat=None):
         path = path.expanduser().resolve(strict=True)
-        document_id = "doc_" + hashlib.sha256((self.collection + "\0" + str(path)).encode()).hexdigest()[:32]
+        document_id = source_id(self.collection, path)
         digest = checksum(path)
         try:
             existing = self.store.document(self.collection, document_id)
         except ValueError:
             existing = None
-        if existing and existing["checksum"] == digest and existing.get("status") != "failed":
+        if existing and existing["checksum"] == digest and existing.get("status") != "failed" and (not rich or existing.get("rich_extraction")):
             record = existing
             changed = False
         else:
-            units = extract_units(path)
+            units = extract_units(path, rich=rich)
             if checksum(path) != digest:
                 raise ValueError("File changed during extraction. Retry indexing this file.")
             for unit in units:
                 unit.update(overview(unit["content"]), summary_kind="extractive_preview")
             record = {
                 "id": document_id, "collection": self.collection, "name": path.name, "path": str(path),
-                "source": "local", "checksum": digest, "units": units, "unit_count": len(units),
+                "source": "local", "checksum": digest, "units": units, "unit_count": len(units), "rich_extraction": rich,
                 "summary_kind": "extractive_preview", "analysis_status": "pending", "extractions": {},
                 "embedding_status": "disabled" if self.settings["model"] == "none" else "pending",
                 "status": "partial", "updated_at": now(), **overview("\n".join(unit["summary"] for unit in units)),
@@ -107,10 +193,12 @@ class Engine:
             self.store.save_document(record, self.make_chunks(record))
             changed = True
         semantic = not lexical_only and self.settings["model"] != "none"
-        if semantic and (changed or record.get("embedding_key") != model_key(self.settings) or record.get("embedding_status") != "ready"):
+        analyzed = self.full_analysis(record, heartbeat) if full else False
+        if semantic and (changed or analyzed or record.get("embedding_key") != model_key(self.settings)
+                         or record.get("embedding_status") != "ready" or record.get("hierarchy_version") != HIERARCHY_VERSION):
             try:
                 chunks = self.make_chunks(record, semantic=True)
-                record.update(embedding_status="ready", embedding_key=model_key(self.settings), updated_at=now())
+                record.update(embedding_status="ready", embedding_key=model_key(self.settings), hierarchy_version=HIERARCHY_VERSION, updated_at=now())
                 record.pop("embedding_error", None)
                 record["status"] = "ready" if record["analysis_status"] == "ready" else "partial"
                 self.store.save_document(record, chunks)
@@ -118,30 +206,49 @@ class Engine:
                 record.update(embedding_status="failed", embedding_error=str(exc), status="partial", updated_at=now())
                 self.store.save_document(record)
                 raise ValueError(f"Text is indexed, but embeddings failed: {exc}") from exc
-        return {**public_document(record), "index_action": "indexed" if changed else "unchanged"}
+        return {**public_document(record), "index_action": "indexed" if changed or analyzed else "unchanged"}
 
-    def run_job(self, job_id: str):
+    def run_job(self, job_id: str, *, current_settings=None):
         import psutil
         job = self.store.job(self.collection, job_id)
         if job["status"] not in {"queued", "interrupted", "failed", "completed_with_errors"}:
             raise ValueError("Only queued, interrupted or failed jobs can run/resume.")
         try:
             with collection_lock(self.root, self.collection):
+                if "source_profile" in job and job["source_profile"] != load_profile(self.root, self.collection):
+                    raise ValueError("Collection profile changed; start a new indexing job with the reviewed policy.")
+                current = current_settings if current_settings is not None else self.settings
+                summary_changed = job.get("full") and current.get("summary_api") != self.settings.get("summary_api")
+                embedding_changed = not job["lexical_only"] and current.get("embedding_api") != self.settings.get("embedding_api")
+                if summary_changed or embedding_changed:
+                    raise ValueError("API provider settings changed; start a new indexing job with the selected services.")
                 job.pop("error", None)
                 job.update(status="running", pid=os.getpid(), process_created=psutil.Process().create_time(), updated_at=now(), result={"indexed": [], "errors": []})
                 self.store.save_job(job)
                 paths, errors = discover(job["paths"], recursive=job["recursive"])
+                eligible = {"default", "explicit_only"}
+                selected, skipped = [], []
+                for path in paths:
+                    if (source_policy(self.profile, path) or {}).get("visibility") in eligible:
+                        selected.append(path)
+                    else:
+                        skipped.append(str(path))
+                paths = selected
+                job["result"]["excluded"] = skipped
                 job["total"] = len(paths)
                 job["result"]["errors"].extend(errors)
                 for index, path in enumerate(paths):
                     job.update(current_path=str(path), processed=index, updated_at=now())
                     self.store.save_job(job)
                     try:
-                        job["result"]["indexed"].append(self.index_file(path, lexical_only=job["lexical_only"]))
+                        def heartbeat():
+                            job.update(updated_at=now())
+                            self.store.save_job(job)
+                        job["result"]["indexed"].append(self.index_file(path, lexical_only=job["lexical_only"], full=job.get("full", False), rich=job.get("rich", False), heartbeat=heartbeat))
                     except Exception as exc:
                         job["result"]["errors"].append({"path": str(path), "error": str(exc)})
                         # An invalid changed file must not leave prior content searchable as current.
-                        document_id = "doc_" + hashlib.sha256((self.collection + "\0" + str(path)).encode()).hexdigest()[:32]
+                        document_id = source_id(self.collection, path)
                         try:
                             old = self.store.document(self.collection, document_id)
                             if old["checksum"] != checksum(path):
@@ -159,21 +266,29 @@ class Engine:
             raise
         return job
 
-    def search(self, query: str, stage: str, ids: list[str] | None, limit: int, semantic: bool):
-        if semantic and stage != "chunks":
-            raise ValueError("Semantic search applies to --stage chunks; use cheaper catalog stages first.")
-        lexical = self.store.lexical(self.collection, query, stage, ids, limit * 3 if semantic else limit)
+    def scope(self, ids, include_explicit=False, route=None):
+        return retrieval_scope(self.store, self.collection, self.profile, ids, include_explicit, route)
+
+    def search(self, query: str, stage: str, ids: list[str] | None, limit: int, semantic: bool, *,
+               exact=False, include_explicit=False, route=None, dense_only=False):
+        ids, ranks = self.scope(ids, include_explicit, route)
+        if exact:
+            return self.store.exact(self.collection, query, stage, ids, limit, ranks)
+        lexical = [] if dense_only else self.store.lexical(self.collection, query, stage, ids, limit * 3 if semantic else limit, ranks)
         if not semantic:
             return lexical[:limit]
         if ids == []:
             return []
         vectors = self.embedder().encode([query], query=True)
-        dense = self.store.semantic(self.collection, vectors[0], model_key(self.settings), ids, limit * 3)
+        dense = self.store.semantic(self.collection, vectors[0], model_key(self.settings), ids, limit * 3, stage, ranks)
+        if dense_only:
+            return dense[:limit]
         # Reciprocal rank fusion keeps unlike SQL/vector scores from being compared numerically.
         fused = {}
         for source, results in (("keyword", lexical), ("semantic", dense)):
             for rank, row in enumerate(results, 1):
-                entry = fused.setdefault(row["chunk_id"], {**row, "fusion_score": 0.0, "matched_by": []})
+                fusion_key = (row["document_id"], row.get("unit")) if stage != "chunks" else row["chunk_id"]
+                entry = fused.setdefault(fusion_key, {**row, "fusion_score": 0.0, "matched_by": []})
                 entry["fusion_score"] += 1 / (60 + rank)
                 entry["matched_by"].append(source)
         return sorted(fused.values(), key=lambda item: item["fusion_score"], reverse=True)[:limit]
@@ -197,9 +312,11 @@ class Engine:
                     raise ValueError("Every unit update needs a valid number, summary and tagline.")
                 unit.update(summary=update["summary"], tagline=update["tagline"], summary_kind="agent_analysis")
             record.update(tagline=data["tagline"], summary=data["summary"], keywords=data.get("keywords", []), summary_kind="agent_analysis", updated_at=now())
+            record.pop("summary_key", None)
+            record.pop("hierarchy_version", None)
             record["analysis_status"] = "ready" if all(unit["summary_kind"] == "agent_analysis" for unit in record["units"]) else "partial"
             record["status"] = "ready" if record["analysis_status"] == "ready" and (self.settings["model"] == "none" or record.get("embedding_key") == model_key(self.settings) and record["embedding_status"] == "ready") else "partial"
-            self.store.save_document(record)
+            self.store.save_document(record, invalidate_context=True)
         return public_document(record)
 
     def save_extraction(self, document_id: str, data: dict):

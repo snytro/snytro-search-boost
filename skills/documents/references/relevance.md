@@ -14,6 +14,8 @@ from listing every match or proving absence. Use relevant follow-up context;
 do not infer requirements from unrelated chat. If an ambiguity changes which
 documents qualify, ask for clarification while retrieving useful scoped evidence.
 
+Read the saved [collection profile](profiles.md) before retrieval. Choose the
+highest-authority applicable route and follow its verification policy.
 Keep the active collection and any user-selected document IDs fixed. Your model
 may choose search terms and candidate subsets within that scope, but cannot expand
 to unrelated collections/files or index new paths without user authorization.

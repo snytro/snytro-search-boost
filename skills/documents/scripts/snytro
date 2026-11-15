@@ -11,7 +11,7 @@ if [[ -z "${SNYTRO_DATA_DIR:-}" ]]; then
   fi
 fi
 PYTHON="$SNYTRO_DATA_DIR/runtime/.venv/bin/python"
-if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" -c 'import snytro_cli' >/dev/null 2>&1; then
+if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" "$PACKAGE_DIR/scripts/check-version.py" >/dev/null 2>&1; then
   bash "$PACKAGE_DIR/scripts/bootstrap.sh"
 fi
 exec "$PYTHON" -m snytro_cli.cli "$@"

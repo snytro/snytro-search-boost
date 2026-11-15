@@ -1,12 +1,13 @@
 # Snytro Search Boost
 
 Give **Codex and Claude Code searchable document memory** with a reusable skill
-and local CLI. **Set up → Index → Ask.** Choose SQLite (default) or PostgreSQL,
-and optional CPU embeddings. No MCP server, Ollama, preinstalled Python,
-desktop file-manager app, or separate LLM API key is required.
+and local CLI. **Set up → Curate → Index → Ask.** Choose SQLite (default) or
+PostgreSQL, local CPU embeddings or an optional embedding API, and host
+summaries or API summaries. Key-free mode still needs no separate API key.
 
-Developed by **[Snytro](https://snytro.com)**. This is an early `0.1.2` release
-distributed from GitHub, not an approved listing in the public plugin directories.
+Developed by **[Snytro](https://snytro.com)**. Version `0.2.0` adds curated
+collections, semantic search over the hierarchy, and corpus handover.
+GitHub distribution is separate from public directory approval.
 
 ## Install in Codex desktop
 
@@ -121,6 +122,7 @@ model weights or index any files. Only index files or folders you select.
 | PostgreSQL + pgvector | An existing server or a dedicated local cluster |
 | UltraBERT-Embed-150M | Smaller English embedding model |
 | Nemotron-3-Embed-1B-BF16 | Larger multilingual embedding model, run on CPU |
+| OpenAI or OpenAI-compatible API | Optional, independent embedding and summary providers |
 
 The machine recommendation considers memory, language, and your preference.
 It is a memory-fit heuristic, not a universal accuracy ranking or an Intel i5
@@ -131,6 +133,11 @@ PostgreSQL requires pgvector. You can supply a database URL through
 `SNYTRO_POSTGRES_URL` or provide PostgreSQL binaries with matching pgvector.
 Optional automatic PostgreSQL installation is macOS/Homebrew only and requires
 Homebrew to be installed already. SQLite needs neither Homebrew nor PostgreSQL.
+
+For a curated project, establish [source ranks, routes and exclusions](skills/documents/references/profiles.md)
+before indexing. Choose a summary API and use `index --full --rich` to build and
+checkpoint unit summaries automatically, then run `verify --check-originals`.
+See the [provider commands](skills/documents/references/setup.md).
 
 ## Manual skill installation
 
@@ -157,7 +164,8 @@ bash skills/documents/scripts/snytro --collection contracts search "cancellation
 
 For Nemotron, choose `--model nemotron`. Indexing returns a durable job ID; poll
 status and resume interrupted work with `resume JOB_ID`. The host agent builds
-hierarchical summaries and optional structured fields, then answers with sources.
+summaries in key-free mode, or `index --full` calls the configured summary API.
+The host can save optional structured fields and answers with sources.
 Initial extractive previews are labeled, and text/keyword retrieval can work while
 semantic indexing or agent analysis is incomplete. The CLI's `search` command
 returns evidence; the host agent writes the final answer.
@@ -178,29 +186,31 @@ See [command reference](skills/documents/references/commands.md) and
 
 User indexes, settings, runtime, model cache, and job logs live in the user's
 SnytroCLI application-data directory, **outside the plugin**. Set `SNYTRO_DATA_DIR`
-to use another location. Plugin upgrades preserve that external data. Storage
-migration between SQLite and PostgreSQL is not implemented.
+to use another location. Plugin upgrades preserve that data. Export and restore
+can move prepared collections, routing policy, and vectors between machines or
+storage backends. See [handover instructions](skills/documents/references/profiles.md).
 
 Retrieval stays in the chosen collection and selected document IDs. Changed files
 invalidate old analysis and extracted fields. PostgreSQL uses dedicated
 `snytro_*` tables; collections are retrieval scopes, not database user
 authentication or multi-user access controls.
 
-Extraction, embeddings, and storage are local. Text retrieved into Codex or
-Claude Code is processed under that host/provider's data handling. Local storage
-does not mean the entire agent workflow is offline. No cloud-drive integration,
-email sending, or other cloud actions are included.
+Extraction and storage are local. API modes transmit selected source content
+or queries to the configured services; local CPU embedding mode does not.
+Retrieved text shown to Codex or Claude Code is also subject to the host's data
+handling. Optional official-web checks are done by the host under collection policy.
 
 ## Supported files and current limits
 
-PDF, DOCX, text/Markdown, CSV/TSV, JSON, HTML, and XLSX are supported. Scanned PDFs
-need OCR, which is not bundled. Spreadsheet formulas are retained, not recalculated.
-Citations use physical PDF pages, document units, or sheet/row ranges.
+PDF, DOCX, PPTX, draw.io, XML, text/Markdown, CSV/TSV, JSON, HTML, and XLSX are
+supported. Image and scanned-PDF extraction uses external OCR tools. DOCX page
+locators require a LibreOffice rendition; XLSX formulas are retained.
 
 macOS ARM64 is the verified initial platform. Linux and Windows launchers exist
 but have not been validated on those platforms; there is no Windows installer.
 The 16 GB Intel i5 target still needs performance testing.
-Keyword search remains broad, multilingual tokenization can yield fragment matches,
+Keyword search remains broad; use exact lookup for exact terms and identifiers.
+Database keyword tokenizers can still segment some scripts differently,
 and reindexing a folder does not automatically prune records for deleted files.
 The agent's relevance review improves selection after retrieval; it does not replace
 tokenizer or index-maintenance work, or guarantee recall beyond inspected candidates.

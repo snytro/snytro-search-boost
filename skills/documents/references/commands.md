@@ -6,6 +6,7 @@ Exit 0 is success, 1 is an error (including completed ingestion with failed path
 
 ```text
 scripts/snytro --collection contracts index "/selected/contracts"
+scripts/snytro --collection contracts index --full --rich "/selected/contracts"
 scripts/snytro --collection contracts status <job-id>
 scripts/snytro --collection contracts list --limit 100 --offset 0
 scripts/snytro --collection contracts search "termination notice" --stage taglines
@@ -13,6 +14,7 @@ scripts/snytro --collection contracts summaries --document-ids <id1> <id2>
 scripts/snytro --collection contracts structured --document-ids <id1> --fields total currency
 scripts/snytro --collection contracts search "termination notice" --stage chunks --semantic --document-ids <id1> <id2>
 scripts/snytro --collection contracts search "termination notice" --stage pages --document-ids <id1>
+scripts/snytro --collection contracts search "ABC-123" --stage chunks --exact --document-ids <id1>
 scripts/snytro --collection contracts fetch <id1> --unit 3 --offset 0 --max-chars 12000
 scripts/snytro --collection contracts save-analysis <id1> --input "/temporary/analysis.json"
 scripts/snytro --collection contracts save-extraction <id1> --input "/temporary/extraction.json"
@@ -25,9 +27,11 @@ reuses saved paths/settings and reprocesses only necessary content/embedding wor
 `--document-ids` with no values intentionally matches nothing. Never omit an empty
 scope just to obtain results. `list` is paginated; continue while full pages are returned.
 
-Catalog stages are keyword retrieval; `chunks --semantic` fuses keyword and vector
-results using reciprocal rank fusion. KNN filters apply to collection and document
-IDs before top-k. Scores across retrieval surfaces are not interchangeable.
+All four stages support `--dense-only` or `--semantic` (keyword/vector fusion).
+Dense ranking uses primary and context vectors and the configured source authority.
+`--exact` does literal lookup; at the chunks stage it scans complete original
+units, including matches across chunk boundaries. Fetch the unit it returns.
+Scope, route, model and source eligibility filter candidates before ranking.
 All returned rows are candidates. The invoking agent must judge relevance against
 the user's requirements and exclusions; the CLI runs no internal LLM relevance
 filter. Use [relevance.md](relevance.md) to accept or reject evidence before answering.
@@ -37,9 +41,13 @@ completed semantic compression.
 
 `fetch` returns stored extraction, not a reread of a potentially changed original.
 It reports the indexed checksum; reindex explicitly if current disk content is required.
-PDFs keep physical page numbers; DOCX/text use document units; XLSX keeps formulas
-and labels sheet/row ranges. Scanned PDFs require external OCR. Legacy .doc/.xls,
-RTF, images and slide decks are not supported in v0.1.
+PDFs keep physical page numbers; `--rich` can produce DOCX rendition pages and
+text line ranges. XLSX retains formulas and sheet/row ranges. Slides, diagrams
+and image OCR have their own locators. Scanned PDFs require external OCR tools.
+Legacy .doc/.xls and RTF are not supported.
+
+`verify --check-originals` checks profile inventory, readiness and stored
+checksums. See [profiles.md](profiles.md) for routes, visibility and handover.
 
 `structured` returns saved fields with source unit IDs. `--fields` supports dotted
 object paths; arrays remain available in the full fields object. No arbitrary SQL

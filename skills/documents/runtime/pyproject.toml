@@ -1,6 +1,6 @@
 [project]
 name = "snytro-documents-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local document ingestion and scoped hierarchical retrieval for agent skills"
 requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
